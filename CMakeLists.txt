@@ -18,6 +18,19 @@ find_package(CURL REQUIRED)
 
 find_package(nlohmann_json REQUIRED)
 
+# ---------------------------------------------------------------------------
+# Detekcja dynamicznego tripletu vcpkg
+# Kopiowanie bibliotek dynamicznych wykonywane jest tylko dla tripletów:
+#   x64-windows, x64-linux-dynamic, arm64-osx-dynamic
+# ---------------------------------------------------------------------------
+set(_VCPKG_DYNAMIC_TRIPLETS "x64-windows" "x64-linux-dynamic" "arm64-osx-dynamic")
+if(DEFINED VCPKG_TARGET_TRIPLET AND VCPKG_TARGET_TRIPLET IN_LIST _VCPKG_DYNAMIC_TRIPLETS)
+    set(VCPKG_IS_DYNAMIC TRUE)
+else()
+    set(VCPKG_IS_DYNAMIC FALSE)
+endif()
+message(STATUS "VCPKG_TARGET_TRIPLET = ${VCPKG_TARGET_TRIPLET}  |  VCPKG_IS_DYNAMIC = ${VCPKG_IS_DYNAMIC}")
+
 # 4. Definicja plików źródłowych aplikacji
 set(SOURCES
     LottoWizard.cpp LottoWizard.h
@@ -42,8 +55,24 @@ target_link_libraries(${PROJECT_NAME}
         SQLite::SQLite3
 )
 
-if(LINUX OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # --- WDRAŻANIE NA LINUX (Ubuntu / WSL) ---
+# ---------------------------------------------------------------------------
+# Windows – kopiowanie DLL z vcpkg (tylko triplet dynamiczny: x64-windows)
+# ---------------------------------------------------------------------------
+if(WIN32 AND VCPKG_IS_DYNAMIC)
+    # TARGET_RUNTIME_DLLS zbiera wszystkie .dll linkowanych targetów (CMake >= 3.21)
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}>
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        COMMAND_EXPAND_LISTS
+        COMMENT "Kopiowanie DLL z vcpkg obok aplikacji (x64-windows)"
+    )
+endif()
+
+# ---------------------------------------------------------------------------
+# Linux – kopiowanie .so z vcpkg (tylko triplet dynamiczny: x64-linux-dynamic)
+# ---------------------------------------------------------------------------
+if((LINUX OR CMAKE_SYSTEM_NAME STREQUAL "Linux") AND VCPKG_IS_DYNAMIC)
     include(GNUInstallDirs)
 
     # 1. Ustal bazowy katalog installed vcpkg
@@ -180,7 +209,10 @@ endforeach()
 
 endif()
 
-if(APPLE)
+# ---------------------------------------------------------------------------
+# macOS – wdrażanie .dylib (tylko triplet dynamiczny: arm64-osx-dynamic)
+# ---------------------------------------------------------------------------
+if(APPLE AND VCPKG_IS_DYNAMIC)
     # 1. Włączamy automatyczne kopiowanie głównych dylibów przez vcpkg do folderu Frameworks
     set(X_VCPKG_APPLOCAL_DEPS ON CACHE BOOL "Automatycznie kopiuj zależności z vcpkg")
 
